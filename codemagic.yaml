@@ -264,7 +264,11 @@ workflows:
   youtube_plus:
     name: Create YouTube Plus app
     instance_type: mac_mini_m2
-    max_build_duration: 60
+    # Maximum allowed by Codemagic. Note: after a successful build, an open SSH/VNC
+    # session keeps the machine alive until this limit is reached (see
+    # "Remote access session time limit" in the Codemagic docs), so this also
+    # extends the post-build debug session to ~2 hours.
+    max_build_duration: 120
     labels:
       - v${{ inputs.tweak_version }}
     inputs:
@@ -379,7 +383,11 @@ workflows:
   youtube_plus_beta:
     name: "[BETA] Create YouTube Plus app"
     instance_type: mac_mini_m2
-    max_build_duration: 60
+    # Maximum allowed by Codemagic. Note: after a successful build, an open SSH/VNC
+    # session keeps the machine alive until this limit is reached (see
+    # "Remote access session time limit" in the Codemagic docs), so this also
+    # extends the post-build debug session to ~2 hours.
+    max_build_duration: 120
     inputs:
       enable_youpip:
         description: Integrate YouPiP
