@@ -1,0 +1,489 @@
+# codemagic.yaml — build the YouTube Plus app on Codemagic
+#
+# This file mirrors the GitHub Actions workflows in .github/workflows:
+#   - youtube_plus      -> .github/workflows/main.yml     (Create YouTube Plus app)
+#   - youtube_plus_beta -> .github/workflows/ytp_beta.yml ([BETA] Create YouTube Plus app)
+#
+# Usage:
+#   1. Add this repository to Codemagic as an application (project type: Other).
+#   2. Click "Start new build", pick a workflow and fill in the build inputs
+#      (decrypted IPA URL, tweak version/URL, optional tweaks to integrate, etc.).
+#   3. The finished .ipa is available in the Artifacts section of the build page.
+#
+# Optional: to automatically publish a draft GitHub release (like the GitHub
+# Actions workflows do), create a GitHub personal access token with `repo` scope,
+# add it as a *secret* variable named GITHUB_TOKEN in Codemagic
+# (App settings > Environment variables, group name: github_credentials),
+# then uncomment the `groups:` lines in the environment sections below.
+#
+# Tweak integration details: https://github.com/dayanch96/YTLite#tweak-integration-details
+
+definitions:
+  scripts:
+    # ---------------------------------------------------------------------------
+    # Theos build environment (only needed when optional tweaks are selected)
+    # ---------------------------------------------------------------------------
+    - &setup_theos
+      name: Set up Theos
+      script: |
+        set -e
+        any_enabled=0
+        for flag in "${{ inputs.enable_youpip }}" "${{ inputs.enable_ytuhd }}" "${{ inputs.enable_yq }}" "${{ inputs.enable_ryd }}" "${{ inputs.enable_ytabc }}" "${{ inputs.enable_demc }}"; do
+          if [ "$flag" = "true" ]; then
+            any_enabled=1
+          fi
+        done
+        if [ "$any_enabled" = "0" ]; then
+          echo "No optional tweaks selected — skipping Theos setup."
+          exit 0
+        fi
+
+        HOMEBREW_NO_AUTO_UPDATE=1 brew install make ldid dpkg
+        export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
+        export THEOS="$CM_BUILD_DIR/theos"
+
+        # Theos (pinned to the same revision as the GitHub Actions workflow)
+        if [ ! -d "$THEOS/.git" ]; then
+          git clone --quiet https://github.com/theos/theos.git "$THEOS"
+          git -C "$THEOS" checkout --quiet 9bc73406cf80b711ef4d02c15ff1dedc4478a275
+          git -C "$THEOS" submodule update --init --recursive
+        fi
+
+        # iOS SDK
+        if [ ! -d "$THEOS/sdks/iPhoneOS16.5.sdk" ]; then
+          mkdir -p "$THEOS/sdks"
+          git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/theos/sdks/ sdks
+          git -C sdks sparse-checkout set --no-cone iPhoneOS16.5.sdk
+          git -C sdks checkout
+          mv sdks/*.sdk "$THEOS/sdks/"
+          rm -rf sdks
+        fi
+
+        # Headers
+        cd "$THEOS/include"
+        if [ -d YouTubeHeader/.git ]; then
+          git -C YouTubeHeader pull --quiet || { rm -rf YouTubeHeader; git clone --quiet --depth=1 https://github.com/PoomSmart/YouTubeHeader.git; }
+        else
+          git clone --quiet --depth=1 https://github.com/PoomSmart/YouTubeHeader.git
+        fi
+        if [ "${{ inputs.enable_demc }}" = "true" ]; then
+          rm -rf "$THEOS/include/YTHeaders"
+          cp -R "$THEOS/include/YouTubeHeader" "$THEOS/include/YTHeaders"
+        fi
+        if [ -d PSHeader/.git ]; then
+          git -C PSHeader pull --quiet || { rm -rf PSHeader; git clone --quiet --depth=1 https://github.com/PoomSmart/PSHeader.git; }
+        else
+          git clone --quiet --depth=1 https://github.com/PoomSmart/PSHeader.git
+        fi
+        cd "$CM_BUILD_DIR"
+
+    # ---------------------------------------------------------------------------
+    # Optional tweak builds
+    # ---------------------------------------------------------------------------
+    - &build_youpip
+      name: Build YouPiP
+      when:
+        condition: ${{ inputs.enable_youpip }}
+      script: |
+        set -e
+        export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
+        export THEOS="$CM_BUILD_DIR/theos"
+        git clone --quiet --depth=1 https://github.com/PoomSmart/YouPiP.git
+        cd YouPiP
+        make clean package DEBUG=0 FINALPACKAGE=1
+        mv packages/*.deb ../youpip.deb
+
+    - &build_ytuhd
+      name: Build YTUHD
+      when:
+        condition: ${{ inputs.enable_ytuhd }}
+      script: |
+        set -e
+        export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
+        export THEOS="$CM_BUILD_DIR/theos"
+        git clone --quiet --depth=1 https://github.com/Tonwalter888/YTUHD.git
+        cd YTUHD
+        make clean package DEBUG=0 FINALPACKAGE=1
+        mv packages/*.deb ../ytuhd.deb
+
+    - &build_ryd
+      name: Build Return-YouTube-Dislikes
+      when:
+        condition: ${{ inputs.enable_ryd }}
+      script: |
+        set -e
+        export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
+        export THEOS="$CM_BUILD_DIR/theos"
+        git clone --quiet --depth=1 https://github.com/PoomSmart/Return-YouTube-Dislikes.git
+        cd Return-YouTube-Dislikes
+        make clean package DEBUG=0 FINALPACKAGE=1
+        mv packages/*.deb ../ryd.deb
+
+    - &build_ytabc
+      name: Build YTABConfig
+      when:
+        condition: ${{ inputs.enable_ytabc }}
+      script: |
+        set -e
+        export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
+        export THEOS="$CM_BUILD_DIR/theos"
+        git clone --quiet --depth=1 https://github.com/PoomSmart/YTABConfig.git
+        cd YTABConfig
+        make clean package DEBUG=0 FINALPACKAGE=1
+        mv packages/*.deb ../ytabc.deb
+
+    - &build_ygs
+      name: Build YouGroupSettings
+      script: |
+        set -e
+        needed=0
+        for flag in "${{ inputs.enable_youpip }}" "${{ inputs.enable_ytuhd }}" "${{ inputs.enable_yq }}" "${{ inputs.enable_ryd }}" "${{ inputs.enable_demc }}"; do
+          if [ "$flag" = "true" ]; then
+            needed=1
+          fi
+        done
+        if [ "$needed" = "0" ]; then
+          echo "YouGroupSettings not required — skipping."
+          exit 0
+        fi
+        export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
+        export THEOS="$CM_BUILD_DIR/theos"
+        if [ ! -d YouGroupSettings ]; then
+          git clone --quiet --depth=1 https://github.com/PoomSmart/YouGroupSettings.git
+        fi
+        cd YouGroupSettings
+        make clean package DEBUG=0 FINALPACKAGE=1
+        mv packages/*.deb ../ygs.deb
+
+    - &build_yq
+      name: Build YouQuality
+      when:
+        condition: ${{ inputs.enable_yq }}
+      script: |
+        set -e
+        export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
+        export THEOS="$CM_BUILD_DIR/theos"
+        git clone --quiet --depth=1 https://github.com/PoomSmart/YouQuality.git
+        cd YouQuality
+        make clean package DEBUG=0 FINALPACKAGE=1
+        mv packages/*.deb ../yq.deb
+
+    - &build_ytvo
+      name: Build YTVideoOverlay
+      script: |
+        set -e
+        needed=0
+        for flag in "${{ inputs.enable_yq }}" "${{ inputs.enable_youpip }}" "${{ inputs.enable_ytuhd }}"; do
+          if [ "$flag" = "true" ]; then
+            needed=1
+          fi
+        done
+        if [ "$needed" = "0" ]; then
+          echo "YTVideoOverlay not required — skipping."
+          exit 0
+        fi
+        export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
+        export THEOS="$CM_BUILD_DIR/theos"
+        if [ ! -d YTVideoOverlay ]; then
+          git clone --quiet --depth=1 https://github.com/PoomSmart/YTVideoOverlay.git
+        fi
+        cd YTVideoOverlay
+        make clean package DEBUG=0 FINALPACKAGE=1
+        mv packages/*.deb ../ytvo.deb
+
+    - &build_demc
+      name: Build DontEatMyContent
+      when:
+        condition: ${{ inputs.enable_demc }}
+      script: |
+        set -e
+        export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
+        export THEOS="$CM_BUILD_DIR/theos"
+        git clone --quiet --depth=1 https://github.com/therealFoxster/DontEatMyContent.git
+        cd DontEatMyContent
+        make clean package DEBUG=0 FINALPACKAGE=1
+        mv packages/*.deb ../demc.deb
+
+    # ---------------------------------------------------------------------------
+    # Packaging
+    # ---------------------------------------------------------------------------
+    - &download_tweak_version
+      name: Download YouTube Plus tweak
+      script: |
+        set -e
+        curl -L --fail --silent --show-error "https://github.com/dayanch96/YTLite/releases/download/v${{ inputs.tweak_version }}/com.dvntm.ytlite_${{ inputs.tweak_version }}_iphoneos-arm.deb" -o ytplus.deb
+        ls -la ytplus.deb
+
+    - &download_tweak_url
+      name: Download YouTube Plus tweak
+      script: |
+        set -e
+        curl -L --fail --silent --show-error "${{ inputs.tweak_url }}" -o ytplus.deb
+        file_type=$(file --mime-type -b ytplus.deb)
+        if [ "$file_type" != "application/vnd.debian.binary-package" ]; then
+          echo "Validation failed: The file is not a valid DEB file. Detected type: $file_type."
+          exit 1
+        fi
+
+    - &download_appex
+      name: Download Open in YouTube (Safari extension)
+      script: |
+        set -e
+        if [ -d OpenYoutubeSafariExtension.appex ]; then
+          echo "Safari extension already present — skipping."
+          exit 0
+        fi
+        git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/BillyCurtis/OpenYouTubeSafariExtension
+        git -C OpenYouTubeSafariExtension sparse-checkout set --no-cone OpenYoutubeSafariExtension.appex
+        git -C OpenYouTubeSafariExtension checkout
+        (cd OpenYouTubeSafariExtension && mv *.appex ../)
+        rm -rf OpenYouTubeSafariExtension
+
+    - &download_ipa
+      name: Download and validate decrypted IPA
+      script: |
+        set -e
+        curl -L --fail --silent --show-error "${{ inputs.ipa_url }}" -o youtube.ipa
+        file_type=$(file --mime-type -b youtube.ipa)
+        if [ "$file_type" != "application/x-ios-app" ] && [ "$file_type" != "application/zip" ]; then
+          echo "Validation failed: The downloaded file is not a valid IPA. Detected type: $file_type."
+          exit 1
+        fi
+
+    - &install_cyan
+      name: Install cyan (pyzule-rw)
+      script: |
+        set -e
+        if [ ! -x "$HOME/cyan-venv/bin/cyan" ]; then
+          python3 -m venv "$HOME/cyan-venv"
+          "$HOME/cyan-venv/bin/pip" install --quiet --upgrade pip
+          "$HOME/cyan-venv/bin/pip" install --quiet https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
+        fi
+
+workflows:
+  youtube_plus:
+    name: Create YouTube Plus app
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    labels:
+      - v${{ inputs.tweak_version }}
+    inputs:
+      enable_youpip:
+        description: Integrate YouPiP
+        type: boolean
+        default: false
+      enable_ytuhd:
+        description: Integrate YTUHD
+        type: boolean
+        default: false
+      enable_yq:
+        description: Integrate YouQuality
+        type: boolean
+        default: false
+      enable_ryd:
+        description: Integrate Return YouTube Dislikes
+        type: boolean
+        default: false
+      enable_ytabc:
+        description: Integrate YTABConfig
+        type: boolean
+        default: false
+      enable_demc:
+        description: Integrate DontEatMyContent
+        type: boolean
+        default: false
+      ipa_url:
+        description: URL to the decrypted IPA file (direct download link)
+        type: string
+      tweak_version:
+        description: The version of the tweak to use (from dayanch96/YTLite releases)
+        type: string
+        default: "5.2.1"
+      display_name:
+        description: App Name (optional)
+        type: string
+        default: "YouTube"
+      bundle_id:
+        description: BundleID (optional)
+        type: string
+        default: "com.google.ios.youtube"
+    environment:
+      # Optional: uncomment after creating a `github_credentials` variable group in
+      # the Codemagic UI (App settings > Environment variables) containing a secret
+      # GITHUB_TOKEN (GitHub personal access token with `repo` scope). It is used to
+      # publish a draft GitHub release with the built IPA.
+      # groups:
+      #   - github_credentials
+      xcode: "16.4" # Theos only needs the Apple toolchain; 16.4 is a known-good version
+    cache:
+      cache_paths:
+        - theos
+    scripts:
+      - *setup_theos
+      - *build_youpip
+      - *build_ytuhd
+      - *build_ryd
+      - *build_ytabc
+      - *build_ygs
+      - *build_yq
+      - *build_ytvo
+      - *build_demc
+      - *download_tweak_version
+      - *download_appex
+      - *download_ipa
+      - *install_cyan
+      - name: Inject tweaks into IPA
+        script: |
+          set -e
+          tweaks="ytplus.deb OpenYoutubeSafariExtension.appex"
+          for f in *.deb; do
+            if [ -f "$f" ] && [ "$f" != "ytplus.deb" ]; then
+              tweaks="$tweaks $f"
+            fi
+          done
+          echo "Injecting: $tweaks"
+          "$HOME/cyan-venv/bin/cyan" -i youtube.ipa -o "YouTubePlus_${{ inputs.tweak_version }}.ipa" -uwef $tweaks -n "${{ inputs.display_name }}" -b "${{ inputs.bundle_id }}"
+          touch "$HOME/SUCCESS"
+          ls -la YouTubePlus_*.ipa
+    artifacts:
+      - 'YouTubePlus_*.ipa'
+      - '*.deb'
+    publishing:
+      # Optional email notifications (uncomment and adjust):
+      # email:
+      #   recipients:
+      #     - you@example.com
+      scripts:
+        - name: Publish draft GitHub release
+          script: |
+            set -e
+            if [ ! -f "$HOME/SUCCESS" ]; then
+              echo "Build did not complete successfully — skipping GitHub release."
+              exit 0
+            fi
+            if [ -z "${GITHUB_TOKEN:-}" ]; then
+              echo "GITHUB_TOKEN is not set — skipping the draft GitHub release."
+              echo "The built IPA is available in the Artifacts section of this build."
+              echo "To enable release publishing, add a secret GITHUB_TOKEN variable in Codemagic (App settings > Environment variables, group: github_credentials) and uncomment the groups lines in codemagic.yaml."
+              exit 0
+            fi
+            export GH_TOKEN="$GITHUB_TOKEN"
+            if ! command -v gh > /dev/null 2>&1; then
+              HOMEBREW_NO_AUTO_UPDATE=1 brew install gh
+            fi
+            repo="${CM_REPO_SLUG:-$(git remote get-url origin | sed -E 's#^https://github\.com/##; s#^git@github\.com:##; s#\.git$##')}"
+            tag="ytp-$BUILD_NUMBER"
+            gh release create "$tag" --repo "$repo" --draft --title "YouTubePlus v${{ inputs.tweak_version }} ($BUILD_NUMBER)" "YouTubePlus_${{ inputs.tweak_version }}.ipa"
+            echo "Draft release created — see https://github.com/$repo/releases"
+
+  youtube_plus_beta:
+    name: "[BETA] Create YouTube Plus app"
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    inputs:
+      enable_youpip:
+        description: Integrate YouPiP
+        type: boolean
+        default: false
+      enable_ytuhd:
+        description: Integrate YTUHD
+        type: boolean
+        default: false
+      enable_yq:
+        description: Integrate YouQuality
+        type: boolean
+        default: false
+      enable_ryd:
+        description: Integrate Return YouTube Dislikes
+        type: boolean
+        default: false
+      enable_ytabc:
+        description: Integrate YTABConfig
+        type: boolean
+        default: false
+      enable_demc:
+        description: Integrate DontEatMyContent
+        type: boolean
+        default: false
+      ipa_url:
+        description: URL to the decrypted IPA file (direct download link)
+        type: string
+      tweak_url:
+        description: URL to the YouTube Plus tweak file (.deb, direct download link)
+        type: string
+      display_name:
+        description: App Name (optional)
+        type: string
+        default: "YouTube"
+      bundle_id:
+        description: BundleID (optional)
+        type: string
+        default: "com.google.ios.youtube"
+    environment:
+      # Optional: uncomment after creating a `github_credentials` variable group in
+      # the Codemagic UI (App settings > Environment variables) containing a secret
+      # GITHUB_TOKEN (GitHub personal access token with `repo` scope). It is used to
+      # publish a draft GitHub release with the built IPA.
+      # groups:
+      #   - github_credentials
+      xcode: "16.4" # Theos only needs the Apple toolchain; 16.4 is a known-good version
+    cache:
+      cache_paths:
+        - theos
+    scripts:
+      - *setup_theos
+      - *build_youpip
+      - *build_ytuhd
+      - *build_ryd
+      - *build_ytabc
+      - *build_ygs
+      - *build_yq
+      - *build_ytvo
+      - *build_demc
+      - *download_tweak_url
+      - *download_appex
+      - *download_ipa
+      - *install_cyan
+      - name: Inject tweaks into IPA
+        script: |
+          set -e
+          tweaks="ytplus.deb OpenYoutubeSafariExtension.appex"
+          for f in *.deb; do
+            if [ -f "$f" ] && [ "$f" != "ytplus.deb" ]; then
+              tweaks="$tweaks $f"
+            fi
+          done
+          echo "Injecting: $tweaks"
+          "$HOME/cyan-venv/bin/cyan" -i youtube.ipa -o "YouTubePlus_Beta.ipa" -uwef $tweaks -n "${{ inputs.display_name }}" -b "${{ inputs.bundle_id }}"
+          touch "$HOME/SUCCESS"
+          ls -la YouTubePlus_Beta.ipa
+    artifacts:
+      - 'YouTubePlus_Beta.ipa'
+      - '*.deb'
+    publishing:
+      # Optional email notifications (uncomment and adjust):
+      # email:
+      #   recipients:
+      #     - you@example.com
+      scripts:
+        - name: Publish draft GitHub release
+          script: |
+            set -e
+            if [ ! -f "$HOME/SUCCESS" ]; then
+              echo "Build did not complete successfully — skipping GitHub release."
+              exit 0
+            fi
+            if [ -z "${GITHUB_TOKEN:-}" ]; then
+              echo "GITHUB_TOKEN is not set — skipping the draft GitHub release."
+              echo "The built IPA is available in the Artifacts section of this build."
+              echo "To enable release publishing, add a secret GITHUB_TOKEN variable in Codemagic (App settings > Environment variables, group: github_credentials) and uncomment the groups lines in codemagic.yaml."
+              exit 0
+            fi
+            export GH_TOKEN="$GITHUB_TOKEN"
+            if ! command -v gh > /dev/null 2>&1; then
+              HOMEBREW_NO_AUTO_UPDATE=1 brew install gh
+            fi
+            repo="${CM_REPO_SLUG:-$(git remote get-url origin | sed -E 's#^https://github\.com/##; s#^git@github\.com:##; s#\.git$##')}"
+            tag="ytp-beta-$BUILD_NUMBER"
+            gh release create "$tag" --repo "$repo" --draft --title "YouTubePlus Beta ($BUILD_NUMBER)" "YouTubePlus_Beta.ipa"
+            echo "Draft release created — see https://github.com/$repo/releases"

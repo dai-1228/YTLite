@@ -7,6 +7,7 @@ A flexible enhancer for YouTube on iOS, featuring over hundred customizable opti
 - [FAQ](#faq)
 - [Reviews](#reviews)
 - [How to build a YouTube Plus app using GitHub Actions](#how-to-build-a-youtube-plus-app-using-github-actions)
+- [How to build a YouTube Plus app using Codemagic](#how-to-build-a-youtube-plus-app-using-codemagic)
 - [Supported YouTube Version](#supported-youtube-version)
 - [Tweak Integration Details](#tweak-integration-details)
 
@@ -102,6 +103,33 @@ Review by [@qbap](https://github.com/qbap) on ONE Jailbreak: https://onejailbrea
     <li><strong>NOTE:</strong> Make sure to provide a direct download link to the file, not a link to a webpage. Otherwise, the process will fail.</li>
     <li>Make sure all inputs are correct, then click <strong>Run workflow</strong> to start the process.</li>
     <li>Wait for the build to finish. You can download the YouTube Plus app from the releases section of your forked repo. (If you can't find the releases section, go to your forked repo and add /releases to the URL, i.e., github.com/user/YTLite/releases.)</li>
+  </ol>
+</details>
+
+## How to build a YouTube Plus app using Codemagic
+> [!NOTE]
+> If this your first time, complete following steps before starting:
+>
+> 1. Fork this repository using the fork button on the top right
+> 2. Sign up or log in at [codemagic.io](https://codemagic.io) and connect your GitHub account
+> 3. macOS builds consume Codemagic build minutes — check your plan quota
+
+<details>
+  <summary>How to build the YouTube Plus app with Codemagic</summary>
+  <ol>
+    <li>In Codemagic, click <strong>Add application</strong>, connect GitHub and select your forked repository. Choose <strong>Other</strong> as the project type when prompted.</li>
+    <li>The build is configured by the committed <code>codemagic.yaml</code>. Two workflows are available: <strong>Create YouTube Plus app</strong> and <strong>[BETA] Create YouTube Plus app</strong>.</li>
+    <li>Click <strong>Start new build</strong>, select the workflow and fill in the build inputs:
+      <ul>
+        <li>Mark or unmark the tweaks you want to integrate. Learn more about them in the <a href="#tweak-integration-details">Tweak Integration Details</a> section.</li>
+        <li>Prepare a decrypted .ipa file <em>(we cannot provide this due to legal reasons)</em>, then upload it to a file provider (e.g., filebin.net, filemail.com, or Dropbox is recommended) and paste the URL into the provided field.</li>
+        <li><strong>NOTE:</strong> Make sure to provide a direct download link to the file, not a link to a webpage. Otherwise, the process will fail.</li>
+        <li>The <strong>[BETA]</strong> workflow additionally asks for a direct link to the YouTube Plus tweak (.deb) file instead of a version number. You can also change the BundleID and Display Name if desired.</li>
+      </ul>
+    </li>
+    <li>Start the build and wait for it to finish.</li>
+    <li>Download <code>YouTubePlus_*.ipa</code> from the <strong>Artifacts</strong> section of the build page.</li>
+    <li><strong>OPTIONAL:</strong> To publish a draft GitHub release automatically (like the GitHub Actions workflows do), create a GitHub personal access token with <code>repo</code> scope, add it as a <em>secret</em> variable named <code>GITHUB_TOKEN</code> in Codemagic (<strong>App settings → Environment variables</strong>, group name <code>github_credentials</code>), and uncomment the <code>groups:</code> lines in <code>codemagic.yaml</code>. The release will appear in your fork's <strong>Releases</strong> section.</li>
   </ol>
 </details>
 
